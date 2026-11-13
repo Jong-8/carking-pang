@@ -1,0 +1,278 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>카킹 스피드팡</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(160deg,#218fc1,#11234c);font-family:Arial,sans-serif;color:white;min-height:100dvh}
+.game{max-width:460px;margin:auto;padding:18px 14px;text-align:center}
+h1{margin:5px 0;font-size:30px;text-shadow:0 3px #12446b}
+.mascot{font-size:55px;margin:10px}
+.stats{display:flex;gap:8px;margin:15px 0}
+.stat{flex:1;background:#ffffff25;border:1px solid #ffffff55;border-radius:15px;padding:12px 4px}
+.stat small{display:block;font-size:11px;color:#d5f4ff}
+.stat strong{font-size:26px}
+#time{color:#ffe16c}
+.frame{padding:9px;background:linear-gradient(135deg,#c7faff,#3774bd);border-radius:22px;box-shadow:0 9px #071b40,0 15px 25px #0005}
+.board{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;aspect-ratio:1;background:#102e65;padding:7px;border-radius:14px;touch-action:none}
+.tile{display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:clamp(20px,6vw,34px);background:linear-gradient(145deg,var(--a),var(--b));box-shadow:inset 0 2px #fff9,inset 0 -4px #0003,0 3px 3px #0004;border:1px solid #ffffff80;touch-action:none;cursor:pointer}
+.tile.selected{outline:3px solid #fff4a0;transform:scale(.9)}
+.tile.pop{animation:pop .2s forwards}
+.tile.new{animation:drop .25s}
+@keyframes pop{to{transform:scale(0);opacity:0}}
+@keyframes drop{from{transform:translateY(-35px);opacity:0}to{transform:translateY(0);opacity:1}}
+button{border:0;border-radius:14px;background:linear-gradient(#fff5a2,#ffbd32);padding:14px 25px;color:#633500;font-size:17px;font-weight:bold;box-shadow:0 5px #ae6b13;cursor:pointer}
+button:active{transform:translateY(3px)}
+.tip{margin:25px 0 15px;font-size:13px;color:#d4f3ff}
+.overlay{position:fixed;inset:0;background:#071a37cc;display:flex;align-items:center;justify-content:center;padding:20px;z-index:5}
+.modal{background:linear-gradient(145deg,#328fc0,#15396f);border:2px solid #b0efff;border-radius:25px;padding:30px 20px;max-width:340px;width:100%;box-shadow:0 15px 35px #0008}
+.modal h2{font-size:30px}
+.modal p{line-height:1.7;color:#d7f4ff}
+.result{font-size:35px;color:#ffe17b;font-weight:bold;margin:15px}
+.hidden{display:none}
+.combo{position:absolute;left:0;right:0;top:45%;font-size:35px;font-weight:bold;color:#ffe477;text-shadow:0 3px #a74c15;pointer-events:none;animation:fade .65s forwards}
+@keyframes fade{0%{opacity:0;transform:scale(.5)}30%{opacity:1;transform:scale(1.2)}100%{opacity:0;transform:translateY(-30px)}}
+</style>
+</head>
+<body>
+<main class="game">
+<div style="font-size:11px;letter-spacing:4px;color:#a9edff">CARKING MINI GAME</div>
+<h1>🚗 카킹 스피드팡</h1>
+<div style="font-size:12px;color:#c6efff">밀어서 맞추고 콤보를 터뜨려라!</div>
+<div class="mascot">🐻🏎️</div>
+<div class="stats">
+<div class="stat"><small>남은 시간</small><strong id="time">60</strong></div>
+<div class="stat"><small>점수</small><strong id="score">0</strong></div>
+<div class="stat"><small>최고 점수</small><strong id="best">0</strong></div>
+</div>
+<div class="frame"><div id="board" class="board"></div></div>
+<div class="tip">👆 블록을 상하좌우로 밀어 3개 이상 맞추세요!</div>
+<button onclick="start()">↻ 다시 시작</button>
+</main>
+<div id="overlay" class="overlay">
+<div class="modal">
+<div style="font-size:60px" id="emoji">🐻🏎️</div>
+<h2 id="heading">스피드팡!</h2>
+<p id="message">같은 블록 3개 이상을 가로 또는 세로로 맞추세요.<br>제한 시간은 60초!</p>
+<div id="result" class="result"></div>
+<button id="play" onclick="start()">게임 시작 🚀</button>
+</div>
+</div>
+<script>
+const N=7;
+const TYPES=[
+["🚗","#ffaaaa","#d9354d"],
+["⚡","#fff6a0","#e89a1d"],
+["⭐","#ffea9e","#d7952a"],
+["🎁","#f5baff","#a848d0"],
+["🛞","#bddded","#3276aa"],
+["🐻","#ead7b7","#aa784b"]
+];
+const board=document.getElementById("board");
+const overlay=document.getElementById("overlay");
+const timeEl=document.getElementById("time");
+const scoreEl=document.getElementById("score");
+const bestEl=document.getElementById("best");
+let cells=[],running=false,busy=false,selected=-1;
+let score=0,best=0,timer=null,deadline=0,gameId=0;
+try{best=Number(localStorage.getItem("carking-best")||0)}catch(e){}
+bestEl.textContent=best;
+const rand=()=>Math.floor(Math.random()*TYPES.length);
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function makeBoard(){
+cells=[];
+for(let i=0;i<N*N;i++){
+let t,tries=0;
+do{
+t=rand();tries++;
+}while(tries<50&&(
+(i%N>=2&&cells[i-1]===t&&cells[i-2]===t)||
+(i>=N*2&&cells[i-N]===t&&cells[i-N*2]===t)
+));
+cells.push(t);
+}
+if(!hasMove())makeBoard();
+}
+function matches(){
+const found=new Set();
+for(let r=0;r<N;r++){
+let s=0;
+for(let c=1;c<=N;c++){
+if(c<N&&cells[r*N+c]!==null&&cells[r*N+c]===cells[r*N+s])continue;
+if(c-s>=3&&cells[r*N+s]!==null)
+for(let k=s;k<c;k++)found.add(r*N+k);
+s=c;
+}
+}
+for(let c=0;c<N;c++){
+let s=0;
+for(let r=1;r<=N;r++){
+if(r<N&&cells[r*N+c]!==null&&cells[r*N+c]===cells[s*N+c])continue;
+if(r-s>=3&&cells[s*N+c]!==null)
+for(let k=s;k<r;k++)found.add(k*N+c);
+s=r;
+}
+}
+return [...found];
+}
+function adjacent(a,b){
+return a>=0&&b>=0&&b<N*N&&(
+(Math.floor(a/N)===Math.floor(b/N)&&Math.abs(a-b)===1)||
+Math.abs(a-b)===N
+);
+}
+function hasMove(){
+for(let i=0;i<cells.length;i++){
+for(const j of [i+1,i+N]){
+if(!adjacent(i,j))continue;
+[cells[i],cells[j]]=[cells[j],cells[i]];
+const ok=matches().length>0;
+[cells[i],cells[j]]=[cells[j],cells[i]];
+if(ok)return true;
+}
+}
+return false;
+}
+function render(newCells=[]){
+board.innerHTML="";
+cells.forEach((t,i)=>{
+const tile=document.createElement("div");
+tile.className="tile"+(selected===i?" selected":"")+(newCells.includes(i)?" new":"");
+tile.style.setProperty("--a",TYPES[t][1]);
+tile.style.setProperty("--b",TYPES[t][2]);
+tile.textContent=TYPES[t][0];
+tile.dataset.index=i;
+board.appendChild(tile);
+});
+}
+function comboText(count){
+const el=document.createElement("div");
+el.className="combo";
+el.textContent=count>1?"🔥 "+count+" COMBO!":"✨ NICE!";
+board.appendChild(el);
+setTimeout(()=>el.remove(),650);
+}
+async function swap(a,b){
+if(!running||busy||!adjacent(a,b))return;
+busy=true;
+const id=gameId;
+selected=-1;
+[cells[a],cells[b]]=[cells[b],cells[a]];
+render();
+await wait(150);
+if(id!==gameId)return;
+if(matches().length===0){
+[cells[a],cells[b]]=[cells[b],cells[a]];
+render();
+busy=false;
+return;
+}
+let combo=0;
+while(running&&id===gameId){
+const found=matches();
+if(!found.length)break;
+combo++;
+comboText(combo);
+found.forEach(i=>board.children[i]?.classList.add("pop"));
+score+=found.length*100*combo;
+scoreEl.textContent=score.toLocaleString();
+await wait(230);
+if(id!==gameId||!running)return;
+found.forEach(i=>cells[i]=null);
+const added=[];
+for(let c=0;c<N;c++){
+let write=N-1;
+for(let r=N-1;r>=0;r--){
+if(cells[r*N+c]!==null){
+cells[write*N+c]=cells[r*N+c];
+write--;
+}
+}
+while(write>=0){
+const index=write*N+c;
+cells[index]=rand();
+added.push(index);
+write--;
+}
+}
+render(added);
+await wait(250);
+}
+if(id!==gameId)return;
+if(running&&!hasMove()){
+makeBoard();
+render();
+}
+busy=false;
+}
+function end(){
+if(!running)return;
+running=false;
+gameId++;
+clearInterval(timer);
+if(score>best){
+best=score;
+try{localStorage.setItem("carking-best",best)}catch(e){}
+bestEl.textContent=best.toLocaleString();
+}
+document.getElementById("emoji").textContent="🏆";
+document.getElementById("heading").textContent="게임 종료!";
+document.getElementById("message").textContent="60초 동안 획득한 점수";
+document.getElementById("result").textContent=score.toLocaleString()+"점";
+document.getElementById("play").textContent="한 판 더! 🚀";
+overlay.classList.remove("hidden");
+}
+function start(){
+clearInterval(timer);
+gameId++;
+running=true;
+busy=false;
+selected=-1;
+score=0;
+scoreEl.textContent="0";
+timeEl.textContent="60";
+makeBoard();
+render();
+overlay.classList.add("hidden");
+deadline=Date.now()+60000;
+timer=setInterval(()=>{
+if(!running)return;
+const remain=Math.max(0,Math.ceil((deadline-Date.now())/1000));
+timeEl.textContent=remain;
+if(remain<=0)end();
+},100);
+}
+let pointer=null;
+board.addEventListener("pointerdown",e=>{
+const tile=e.target.closest(".tile");
+if(!tile||!running||busy)return;
+pointer={index:Number(tile.dataset.index),x:e.clientX,y:e.clientY};
+});
+board.addEventListener("pointerup",e=>{
+if(!pointer||!running||busy)return;
+const p=pointer;
+pointer=null;
+const dx=e.clientX-p.x,dy=e.clientY-p.y;
+if(Math.max(Math.abs(dx),Math.abs(dy))>16){
+const target=p.index+(Math.abs(dx)>Math.abs(dy)?(dx>0?1:-1):(dy>0?N:-N));
+if(adjacent(p.index,target))swap(p.index,target);
+return;
+}
+const tile=e.target.closest(".tile");
+if(!tile)return;
+const i=Number(tile.dataset.index);
+if(selected>=0&&adjacent(selected,i))swap(selected,i);
+else{
+selected=selected===i?-1:i;
+render();
+}
+});
+board.addEventListener("pointercancel",()=>pointer=null);
+makeBoard();
+render();
+</script>
+</body>
+</html>
